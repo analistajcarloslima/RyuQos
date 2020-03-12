@@ -1,0 +1,218 @@
+SCRIPTS UTILIZADOS NO EXPERIMENTO de QoS SDN
+
+
+Montagem do ambiente de teste
+
+# Criação do ambiente de simulação no MININET
+ sudo mn --topo linear,2 --mac --switch ovsk --controller remote -x
+
+# Configuração função OVSDB para roteadores
+# roteador = "S1"
+ ovs-vsctl set Bridge s1 protocols=OpenFlow13
+ ovs-vsctl set-manager ptcp:6632
+
+# roteador = "S2"
+ ovs-vsctl set Bridge s2 protocols=OpenFlow13
+ ovs-vsctl set-manager ptcp:6632
+
+# Configuração IP para os hosts H1 e H2
+host: H1 (Servidor Iperf):
+ip addr del 10.0.0.1/8 dev h1-eth0
+ip addr add 172.16.20.10/24 dev h1-eth0
+
+ # host: H2 (Clientes UE Iperf):
+ip addr del 10.0.0.1/8 dev h1-eth0
+ ip addr add 172.16.10.20/24 dev h2-eth0
+ 
+# Inicialização do controlador Ryu
+# c0: (Controlador Ryu):
+ryu-manager ryu.app.rest_qos ryu.app.
+qos_rest_router ryu.app.rest_conf_switch
+ 
+ 
+ #Configuração OVSDB
+c0: (Controlador Ryu):
+curl -X PUT -d '"tcp:127.0.0.1:6632"'
+http://localhost:8080/v1.0/conf/switches/0000000000000001/ovsdb_addr
+
+
+# Configuração de endereços para os roteadores S1 e S2
+2
+3 # Roteador S1
+4 curl -X POST -d '{"address": "172.16.20.1/24"}' http://localhost:8080/
+5 router/0000000000000001
+6 curl -X POST -d '{"address": "172.16.30.10/24"}' http://localhost:8080
+7 /router/0000000000000001
+8 curl -X POST -d '{"gateway":"172.16.30.1"}'http://localhost:8080
+9 /router/0000000000000001
+10 # Roteadore S2
+11 curl -X POST -d '{"address": "172.16.10.1/24"}' http://localhost:8080
+12 /router/0000000000000002
+13 curl -X POST -d '{"address": "172.16.30.1/24"}' http://localhost:8080
+14 /router/0000000000000002
+15 curl -X POST -d '{"gateway": "172.16.30.10"}' http://localhost:8080
+16 /router/0000000000000002
+
+
+# Configuração de gateway para os hosts H1 e H2
+2 # host: h1 (Servidor Iperf):
+3 ip route add default via 172.16.20.1
+4
+5 # host: h2 (Clientes UC Iperf):
+6 ip route add default via 172.16.10.1
+
+
+1 # Criação das filas de QoS através do Ryu
+2 # Node: c0 (Ryu):
+3 curl -X POST -d '{"port_name": "s1-eth1","type": "linux-htb", "max_rate":
+4 "1000000000","queues":[{"max_rate": "1000000000"},{"min_rate": "20000000"}
+5 ,{"min_rate":"25000000"},{"min_rate":"50000000"}]}'http://localhost:
+6 8080/qos/queue/0000000000000001
+
+
+1 # Configuração de classificação e marcação de tráfego para roteadores
+2 # Node: c0 (Ryu)
+3 # Marcação de acordo com o tráfego
+4 curl -X POST -d '{"match": {"nw_dst":"172.16.20.10", "nw_proto": "UDP",
+5 "tp_dst": "5001"}, "actions":{"mark": "26"}}'http://localhost:8080/qos/
+6 rules/0000000000000002
+7 curl -X POST -d '{"match": {"nw_dst":"172.16.20.10", "nw_proto": "UDP",
+8 "tp_dst": "5002"}, "actions":{"mark": "10"}}'http://localhost:8080/qos
+9 /rules/0000000000000002
+10 curl -X POST -d '{"match": {"nw_dst":"172.16.20.10", "nw_proto": "UDP",
+11 "tp_dst": "5003"}, "actions":{"mark": "34"}}'http://localhost:8080/qos
+12 /rules/0000000000000002
+13
+14 # Classificação de pacotes marcados para as filas de QoS
+15 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "1"}}'
+16 http://localhost:8080/qos/rules/0000000000000001
+17 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "2"}}'
+18 http://localhost:8080/qos/rules/0000000000000001
+19 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "3"}}'
+20 http://localhost:8080/qos/rules/0000000000000001
+
+
+1 # Verificar as regras de marcação e verificação pelo controlador Ryu
+2 # Node: c0 (Ryu):
+3 curl -X GET http://localhost:8080/qos/rules/0000000000000001
+4 curl -X GET http://localhost:8080/qos/rules/0000000000000002
+
+
+
+1 # Inicialização do servidor Iperf H1
+2 # Node: H1(Servidor Iperf):
+3 iperf -s -u -i 20 -f m -p 5001 > UC5 &
+4 iperf -s -u -i 20 -f m -p 5002 > UC3 &
+5 iperf -s -u -i 20 -f m -p 5003 > UC1
+
+
+1 # Inicialização dos clientes H2
+2 # Node: h2(1) (Clientes Iperf UE):
+3 iperf -c 172.16.20.10 -p 5001 -u -b 20M -i 50 -P 1 &
+4 iperf -c 172.16.20.10 -p 5002 -u -b 25M -i 50 -P 1 &
+5 iperf -c 172.16.20.10 -p 5003 -u -b 50M -i 50 -P 1
+
+
+
+1 # Deletar regras de QoS para toda infraestrutura através do Ryu
+2 # Node: c0 (Ryu):
+3 curl -X DELETE -d '{"qos_id":"all"}'http://localhost:8080/qos/
+4 rules/0000000000000001
+5 curl -X DELETE -d '{"qos_id":"all"}'http://localhost:8080/qos/
+6 rules/0000000000000002
+7 curl -X DELETE http://localhost:8080/qos/queue/0000000000000001
+8 ovs-vsctl --all destroy Qos
+
+
+1 # Verificar regras de QoS ativas através do Ryu
+2 # Node: c0 (Ryu):
+3 ovs-vsctl list QoS
+4 ovs-vsctl list Queue
+
+
+1 # Configuração de classificação para fila de melhor esforço BE
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "0"}}'
+6 http://localhost:8080/qos/rules/0000000000000001
+7 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "0"}}'
+8 http://localhost:8080/qos/rules/0000000000000001
+9 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "0"}}'
+10 http://localhost:8080/qos/rules/0000000000000001
+
+
+1 # Configuração de classificação para o cenário 03
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "1"}}'
+6 http://localhost:8080/qos/rules/0000000000000001
+7 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "2"}}'
+8 http://localhost:8080/qos/rules/0000000000000001
+9 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "3"}}'
+10 http://localhost:8080/qos/rules/000000000000000
+
+
+1 # Configuração de classificação para o cenário 04
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "0"}}'
+65
+6 http://localhost:8080/qos/rules/0000000000000001
+7 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "0"}}'
+8 http://localhost:8080/qos/rules/0000000000000001
+9 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "3"}}'
+10 http://localhost:8080/qos/rules/0000000000000001
+
+
+1 # Configuração de classificação para o cenário 05
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "0"}}'
+6 http://localhost:8080/qos/rules/0000000000000001
+7 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "2"}}'
+8 http://localhost:8080/qos/rules/0000000000000001
+9 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "0"}}'
+10 http://localhost:8080/qos/rules/0000000000000001
+
+
+1 # Configuração de classificação para o cenário 06
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"match": {"ip_dscp":"26"}, "actions":{"queue": "1"}}'
+6 http://localhost:8080/qos/rules/0000000000000001
+7 curl -X POST -d '{"match": {"ip_dscp":"10"}, "actions":{"queue": "0"}}'
+8 http://localhost:8080/qos/rules/0000000000000001
+9 curl -X POST -d '{"match": {"ip_dscp":"34"}, "actions":{"queue": "0"}}'
+10 http://localhost:8080/qos/rules/0000000000000001
+
+
+1 # Criação de filas QoS com valores de taxa máxima
+2 # Node: c0 (Ryu)
+3
+4 # Classificação de pacotes marcados para as filas de QoS
+5 curl -X POST -d '{"port_name": "s1-eth1", "type": "linux-htb",
+6 "max_rate":"1000000000", "queues":[{"max_rate": "1000000000"},
+7 {"max_rate": "21000000"}, {"max_rate":"26000000"},
+8 {"max_rate":"53000000"}]}'
+9 http://localhost:8080/qos/queue/0000000000000001
+
+
+1 # Inicialização dos clientes H2 com taxas de 50 Mbps
+2 # Node: h2(1) (Clientes Iperf UE):
+3 iperf -c 172.16.20.10 -p 5001 -u -b 50M -i 50 -P 1 &
+4 iperf -c 172.16.20.10 -p 5002 -u -b 50M -i 50 -P 1 &
+5 iperf -c 172.16.20.10 -p 5003 -u -b 50M -i 50 -P 1
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,55 @@
+package main;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.swing.JOptionPane;
+
+/*
+ * @author JoaoCarlosLima
+ */
+
+public class Main {
+
+    public static void main(String[] args) {
+        
+        String extract = "";
+        try {
+            BufferedReader br = new BufferedReader(new FileReader("arquivo.txt"));
+/*
+ *parametros de configuracao para leitura do arquivo iperf
+ */
+            while (br.ready()) {
+                String linha = br.readLine();
+                System.out.println(linha);
+                if (linha.contains("Mbits/sec")) {
+                    int inicio = linha.indexOf("Mbits");
+                    String Filtro = linha.substring(inicio-5, inicio) + "\n";
+                    if(!Filtro.contains(".")){
+                        extract += "\n";
+                    }else{
+                        extract += Filtro;
+                    }
+                }
+            }
+            
+            FileWriter arq;
+            try {
+                arq = new FileWriter("iperfextract.txt");
+                PrintWriter gravarArq = new PrintWriter(arq);
+                gravarArq.printf(extract);
+                arq.close();
+                
+                JOptionPane.showMessageDialog(null, "DADOS DE IPERF EXTRAIDOS COM SUCESSO!");
+            } catch (IOException ex) {
+                Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            br.close();
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+        }
+    }
+}
